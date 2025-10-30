@@ -171,7 +171,7 @@ function setupClientListeners(client, userId) {
   });
 }
 
-// --- CREATE NEW CLIENT ---
+// --- CREATE NEW CLIENT --
 async function createClient(userId) {
   if (clients[userId]) {
     console.log(`⚠️ Client for ${userId} already exists.`);
@@ -182,8 +182,16 @@ async function createClient(userId) {
     authStrategy: new LocalAuth({ clientId: userId }),
     puppeteer: {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath: '/usr/bin/chromium-browser',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ],
     },
   });
 
