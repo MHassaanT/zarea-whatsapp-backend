@@ -5,11 +5,11 @@ ENV NODE_ENV=production
 USER root
 
 # Set working directory
-WORKDIR /app
+WORKDIR /tmp
 
 # Create auth directory and set permissions
-RUN mkdir -p /app/.wwebjs_auth && \
-    chown -R pptruser:pptruser /app
+RUN mkdir -p /tmp/.wwebjs_auth && \
+    chown -R pptruser:pptruser /tmp
 
 # Copy package files
 COPY --chown=pptruser:pptruser package*.json ./
