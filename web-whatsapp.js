@@ -170,43 +170,45 @@ function setupClientListeners(client, userId) {
     });
   });
 }
-
-// --- CREATE NEW CLIENT ---
+//---CREATE NEW CLIENT----//
 async function createClient(userId) {
   if (clients[userId]) {
     console.log(`⚠️ Client for ${userId} already exists.`);
     return clients[userId];
   }
 
-  // ✅ Ensure persistent auth directory exists
   const fs = require("fs");
   const AUTH_PATH = "/data/.wwebjs_auth"; // persistent Railway volume
+
   try {
     if (!fs.existsSync(AUTH_PATH)) {
       fs.mkdirSync(AUTH_PATH, { recursive: true });
       console.log("📁 Created persistent auth directory:", AUTH_PATH);
     }
+
+    // ✅ Give full permissions to the directory (fixes EACCES)
+    fs.chmodSync(AUTH_PATH, 0o777);
+    console.log("🔓 Permissions fixed for:", AUTH_PATH);
   } catch (err) {
-    console.error("⚠️ Failed to create auth directory:", err);
+    console.error("⚠️ Failed to prepare auth directory:", err);
   }
 
-  // ✅ Use persistent volume for session data
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: userId,
-      dataPath: AUTH_PATH, // use /data instead of /app
+      dataPath: AUTH_PATH,
     }),
     puppeteer: {
       headless: true,
       args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu'
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+        "--disable-gpu",
       ],
     },
   });
@@ -229,6 +231,7 @@ async function createClient(userId) {
   clients[userId] = client;
   return client;
 }
+
 
 // --- EXPRESS SERVER ---
 const app = express();
