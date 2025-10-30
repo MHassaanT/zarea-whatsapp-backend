@@ -171,15 +171,31 @@ function setupClientListeners(client, userId) {
   });
 }
 
-// --- CREATE NEW CLIENT --
+// --- CREATE NEW CLIENT ---
 async function createClient(userId) {
   if (clients[userId]) {
     console.log(`⚠️ Client for ${userId} already exists.`);
     return clients[userId];
   }
 
+  // ✅ Ensure persistent auth directory exists
+  const fs = require("fs");
+  const AUTH_PATH = "/data/.wwebjs_auth"; // persistent Railway volume
+  try {
+    if (!fs.existsSync(AUTH_PATH)) {
+      fs.mkdirSync(AUTH_PATH, { recursive: true });
+      console.log("📁 Created persistent auth directory:", AUTH_PATH);
+    }
+  } catch (err) {
+    console.error("⚠️ Failed to create auth directory:", err);
+  }
+
+  // ✅ Use persistent volume for session data
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: userId }),
+    authStrategy: new LocalAuth({
+      clientId: userId,
+      dataPath: AUTH_PATH, // use /data instead of /app
+    }),
     puppeteer: {
       headless: true,
       args: [
@@ -196,7 +212,20 @@ async function createClient(userId) {
   });
 
   setupClientListeners(client, userId);
-  client.initialize();
+
+  try {
+    await client.initialize();
+    console.log(`🚀 Initialized WhatsApp client for ${userId}`);
+  } catch (err) {
+    console.error(`❌ Error initializing client for ${userId}:`, err);
+    updateFirestoreStatus(userId, {
+      status: "initialization_failed",
+      connected: false,
+      qr: null,
+      phoneNumber: null,
+    });
+  }
+
   clients[userId] = client;
   return client;
 }
