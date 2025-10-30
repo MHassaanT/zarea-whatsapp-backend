@@ -178,7 +178,7 @@ async function createClient(userId) {
   }
 
   const fs = require("fs");
-  const AUTH_PATH = "/mnt/data/.wwebjs_auth"; // persistent Railway volume
+  const AUTH_PATH = "/tmp/.wwebjs_auth"; // persistent Railway volume
 
   try {
     if (!fs.existsSync(AUTH_PATH)) {
