@@ -1,6 +1,7 @@
 FROM ghcr.io/puppeteer/puppeteer:21.6.1
 
 # Switch to root to set permissions
+ENV NODE_ENV=production
 USER root
 
 # Set working directory
