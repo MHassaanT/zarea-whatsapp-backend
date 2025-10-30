@@ -1,21 +1,31 @@
 FROM ghcr.io/puppeteer/puppeteer:21.6.1
 
+# Switch to root to set permissions
+USER root
+
 # Set working directory
 WORKDIR /app
 
+# Create auth directory and set permissions
+RUN mkdir -p /app/.wwebjs_auth && \
+    chown -R pptruser:pptruser /app
+
 # Copy package files
-COPY package*.json ./
+COPY --chown=pptruser:pptruser package*.json ./
+
+# Switch back to pptruser
+USER pptruser
 
 # Install dependencies
 RUN npm install --production
 
 # Copy application files
-COPY . .
+COPY --chown=pptruser:pptruser . .
 
 # Expose port
 EXPOSE 4000
 
-# Puppeteer is already configured in this image
+# Puppeteer is already configured
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # Start the application
