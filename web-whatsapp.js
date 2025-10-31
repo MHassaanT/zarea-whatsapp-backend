@@ -146,10 +146,20 @@ function setupClientListeners(client, userId) {
   });
 
   client.on("message", async (msg) => {
-    if (!msg.fromMe && msg.body && msg.body.trim() !== "") {
-      await saveRawMessage(msg, userId);
-    }
-  });
+        // 1. **Check if it's NOT a group message.**
+        if (msg.isGroup) {
+            // Ignore messages from groups/communities and exit the function early.
+            console.log(`💬 [${userId}] Ignoring Group/Community message from ${msg.from.substring(0, 10)}...`);
+            return;
+        }
+
+        // 2. Original checks: is not from me, has a body, and body is not empty.
+        if (!msg.fromMe && msg.body && msg.body.trim() !== "") {
+            
+            // This is a 1-on-1 user message. Proceed to save and process.
+            await saveRawMessage(msg, userId); 
+        }
+    });
 
   client.on("disconnected", async (reason) => {
     console.log(`🛑 [${userId}] Disconnected: ${reason}`);
