@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 4000;
 const RAW_MESSAGES_COLLECTION = "raw_messages";
 const clients = {}; // { userId: clientInstance }
 
-// --- FIREBASE SETUP ---
 let db;
 let rawMessagesCollection;
 
@@ -41,14 +40,11 @@ async function initializeFirebase() {
   }
 }
 
-// --- UPDATE SESSION STATUS IN FIRESTORE ---
 async function updateFirestoreStatus(userId, data) {
   try {
     if (!db) return console.error("⚠️ Firestore DB reference is null.");
-
     const docId = userId;
     const targetDoc = db.collection("whatsapp_sessions").doc(docId);
-
     await targetDoc.set({ ...data, userId }, { merge: true });
     console.log(`✅ Firestore Updated [${docId}] → Status=${data.status}`);
   } catch (err) {
@@ -56,23 +52,51 @@ async function updateFirestoreStatus(userId, data) {
   }
 }
 
-// --- SAVE RAW MESSAGE ---
+// --- SAVE RAW MESSAGE (NOW WITH BUNDLING) ---
 async function saveRawMessage(msg, userId) {
   try {
     const phoneNumber = msg.to?.split("@")[0] || "unknown";
 
+    // --- Phase 4, Fix 1: Message Bundling (Debounce) ---
+    // Look for a recent message from this exact sender
+    const recentMessages = await rawMessagesCollection
+        .where('userId', '==', userId)
+        .where('from', '==', msg.from)
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+
+    if (!recentMessages.empty) {
+        const recentDoc = recentMessages.docs[0];
+        const recentData = recentDoc.data();
+        
+        const now = admin.firestore.Timestamp.now().toMillis();
+        const docTime = recentData.timestamp.toMillis();
+        
+        // If the last message is unprocessed and less than 8 seconds old, bundle it
+        if (recentData.processed === false && (now - docTime < 8000)) { 
+            const newBody = recentData.body + "\n" + msg.body;
+            await recentDoc.ref.update({
+                body: newBody,
+                timestamp: admin.firestore.Timestamp.now() // Reset the timer
+            });
+            console.log(`📩 [${userId}] Bundled rapid message into existing doc ${recentDoc.id.substring(0, 8)}`);
+            return recentDoc.ref;
+        }
+    }
+    // --- End Bundling Logic ---
+
+    // Fallback: Create a new document if no recent unbundled message exists
     const messageData = {
       timestamp: admin.firestore.Timestamp.now(),
-      userId, // app user
-      phoneNumber, // their WhatsApp
+      userId, 
+      phoneNumber, 
       from: msg.from,
       to: msg.to,
       type: msg.type,
       body: msg.body || null,
       isGroup: !!msg.isGroup,
       wwebId: msg.id._serialized,
-
-      // AI PROCESSOR QUEUE FIELDS
       processed: false,
       isLead: null,
       replyPending: false,
@@ -89,7 +113,6 @@ async function saveRawMessage(msg, userId) {
   }
 }
 
-// --- AI REPLY EXECUTOR ---
 function startAiReplyExecutor() {
   if (!db) return;
   const q = db.collection(RAW_MESSAGES_COLLECTION).where("replyPending", "==", true);
@@ -122,65 +145,40 @@ function startAiReplyExecutor() {
   });
 }
 
-// --- CLIENT EVENT LISTENERS ---
 function setupClientListeners(client, userId) {
   client.on("qr", (qr) => {
     console.log(`🤖 [${userId}] QR generated`);
-    updateFirestoreStatus(userId, {
-      qr,
-      connected: false,
-      status: "awaiting_scan",
-      phoneNumber: null,
-    });
+    updateFirestoreStatus(userId, { qr, connected: false, status: "awaiting_scan", phoneNumber: null });
   });
 
   client.on("ready", () => {
     const phone = client.info.wid.user;
     console.log(`🎉 [${userId}] WhatsApp Ready (${phone})`);
-    updateFirestoreStatus(userId, {
-      qr: null,
-      connected: true,
-      status: "active",
-      phoneNumber: phone,
-    });
+    updateFirestoreStatus(userId, { qr: null, connected: true, status: "active", phoneNumber: phone });
   });
 
   client.on("message", async (msg) => {
-        // 1. **Check if it's NOT a group message.**
         if (msg.isGroup) {
-            // Ignore messages from groups/communities and exit the function early.
             console.log(`💬 [${userId}] Ignoring Group/Community message from ${msg.from.substring(0, 10)}...`);
             return;
         }
-
-        // 2. Original checks: is not from me, has a body, and body is not empty.
         if (!msg.fromMe && msg.body && msg.body.trim() !== "") {
-            
-            // This is a 1-on-1 user message. Proceed to save and process.
             await saveRawMessage(msg, userId); 
         }
     });
 
   client.on("disconnected", async (reason) => {
     console.log(`🛑 [${userId}] Disconnected: ${reason}`);
-    updateFirestoreStatus(userId, {
-      qr: null,
-      connected: false,
-      status: "disconnected",
-    });
+    updateFirestoreStatus(userId, { qr: null, connected: false, status: "disconnected" });
     delete clients[userId];
   });
 
   client.on("auth_failure", (msg) => {
     console.error(`⚠️ [${userId}] Auth failure:`, msg);
-    updateFirestoreStatus(userId, {
-      qr: null,
-      connected: false,
-      status: "error",
-    });
+    updateFirestoreStatus(userId, { qr: null, connected: false, status: "error" });
   });
 }
-//---CREATE NEW CLIENT----//
+
 async function createClient(userId) {
   if (clients[userId]) {
     console.log(`⚠️ Client for ${userId} already exists.`);
@@ -195,10 +193,7 @@ async function createClient(userId) {
       fs.mkdirSync(AUTH_PATH, { recursive: true });
       console.log("📁 Created persistent auth directory:", AUTH_PATH);
     }
-
-    // ✅ Give full permissions to the directory (fixes EACCES)
     fs.chmodSync(AUTH_PATH, 0o777);
-    console.log("🔓 Permissions fixed for:", AUTH_PATH);
   } catch (err) {
     console.error("⚠️ Failed to prepare auth directory:", err);
   }
@@ -211,14 +206,9 @@ async function createClient(userId) {
     puppeteer: {
       headless: true,
       args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--single-process",
-        "--disable-gpu",
+        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", 
+        "--disable-accelerated-2d-canvas", "--no-first-run", "--no-zygote", 
+        "--single-process", "--disable-gpu"
       ],
     },
   });
@@ -230,25 +220,17 @@ async function createClient(userId) {
     console.log(`🚀 Initialized WhatsApp client for ${userId}`);
   } catch (err) {
     console.error(`❌ Error initializing client for ${userId}:`, err);
-    updateFirestoreStatus(userId, {
-      status: "initialization_failed",
-      connected: false,
-      qr: null,
-      phoneNumber: null,
-    });
+    updateFirestoreStatus(userId, { status: "initialization_failed", connected: false, qr: null, phoneNumber: null });
   }
 
   clients[userId] = client;
   return client;
 }
 
-
-// --- EXPRESS SERVER ---
 const app = express();
 
-// ✅ CORS Configuration - Allow your frontend
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*', // Update this in production
+  origin: process.env.FRONTEND_URL || '*', 
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -256,37 +238,29 @@ app.use(cors({
 
 app.use(express.json());
 
-// --- START WHATSAPP SESSION ---
 app.post("/start-whatsapp", async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: "Missing userId" });
-
   try {
     await createClient(userId);
     res.status(200).json({ message: `Client started for ${userId}` });
   } catch (err) {
-    console.error("❌ Error starting client:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- DISCONNECT CLIENT ---
 app.post("/disconnect", async (req, res) => {
   const { userId } = req.body;
-  if (!userId || !clients[userId])
-    return res.status(400).json({ error: "Invalid or inactive userId" });
-
+  if (!userId || !clients[userId]) return res.status(400).json({ error: "Invalid or inactive userId" });
   try {
     await clients[userId].logout();
     delete clients[userId];
     res.status(200).json({ message: `Client ${userId} disconnected.` });
   } catch (err) {
-    console.error("❌ Error disconnecting client:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- HEALTH CHECK ---
 app.get("/", (req, res) => {
   res.json({ 
     status: "✅ ZareaAI WhatsApp Backend Running",
@@ -295,13 +269,11 @@ app.get("/", (req, res) => {
   });
 });
 
-// --- INIT EVERYTHING ---
 (async () => {
   await initializeFirebase();
   startAiReplyExecutor();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`\n🌍 WhatsApp Backend Server Running`);
     console.log(`📍 Port: ${PORT}`);
-    console.log(`🔗 CORS enabled for: ${process.env.FRONTEND_URL || '*'}`);
   });
 })();
