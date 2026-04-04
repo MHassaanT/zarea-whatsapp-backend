@@ -229,8 +229,22 @@ async function createClient(userId) {
 
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://zarea.site",
+  "https://app.zarea.site"
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*', 
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith("http://localhost:")) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
